@@ -1,7 +1,8 @@
 #include "commands.h"
 #include "fujinet.h"
 #include "fujicom.h"
-#include "com.h"
+#include "portio.h"
+#include "id8250.h"
 #include "print.h"
 #include "dispatch.h"
 #include <stdint.h>
@@ -45,7 +46,6 @@ struct _tm {
   char tm_sec;
 };
 
-cmdFrame_t cmd;
 union REGS regs;
 extern void *config_env, *driver_end;
 
@@ -53,9 +53,11 @@ extern void setf5(void);
 
 #pragma data_seg("_CODE")
 
+uint8_t get_fujinet_version();
 uint8_t get_set_time(uint8_t set_flag);
 void check_uart();
 uint16_t parse_config(const uint8_t far *config_sys);
+void find_drive_letter(uint8_t num_units);
 
 uint16_t Init_cmd(SYSREQ far *req)
 {
@@ -78,10 +80,14 @@ uint16_t Init_cmd(SYSREQ far *req)
   fujicom_init();
   check_uart();
 
-  err = get_set_time(!getenv("NOTIME"));
+  err = get_fujinet_version();
+  if (!err)
+    err = get_set_time(!getenv("NOTIME"));
 
-  // If get_set_time returned error, FujiNet is probably not connected
+  // If get_ returned error, FujiNet is probably not connected
   if (err) {
+    req->init.num_units = 0;
+    req->init.end_ptr = 0;
     fujicom_done();
     return ERROR_BIT;
   }
@@ -115,10 +121,35 @@ uint16_t Init_cmd(SYSREQ far *req)
     req->bpb.table = MK_FP(getCS(), fn_bpb_pointers);
   }
 
+  find_drive_letter(req->init.num_units);
+
   setf5();
   consolef("INT F5 Functions installed.\n");
-  
+
   return OP_COMPLETE;
+}
+
+/* Returns non-zero on error */
+uint8_t get_fujinet_version()
+{
+  char reply = 0;
+  AdapterConfig config;
+  unsigned int idx;
+
+
+  if (!fuji_bus_call(FUJI_DEVICEID_FUJINET, FUJICMD_GET_ADAPTERCONFIG, FUJI_FIELD_NONE,
+                     0, 0, 0, 0,
+                     NULL, 0, &config, sizeof(config))) {
+    consolef("Unable to get FujiNet version %i.\nAborted.\n", reply);
+    return 1;
+  }
+
+  consolef("FujiNet firmware version ");
+  for (idx = 0; idx < sizeof(config.fn_version) && config.fn_version[idx]; idx++)
+    printChar(config.fn_version[idx]);
+  consolef("\n");
+
+  return 0;
 }
 
 /* Returns non-zero on error */
@@ -129,12 +160,9 @@ uint8_t get_set_time(uint8_t set_flag)
   uint16_t year_wcen;
 
 
-  cmd.device = DEVICEID_APETIME;
-  cmd.comnd = CMD_APETIME_GETTZTIME;
-
-  reply = fujicom_command_read(&cmd, (uint8_t *) &cur_time, sizeof(cur_time));
-
-  if (reply != 'C') {
+  if (!fuji_bus_call(FUJI_DEVICEID_CLOCK, FUJICMD_APETIME_GETTZTIME, FUJI_FIELD_NONE,
+                     0, 0, 0, 0,
+                     NULL, 0, &cur_time, sizeof(cur_time))) {
     consolef("Could not read time from FujiNet %i.\nAborted.\n", reply);
     return 1;
   }
@@ -168,11 +196,10 @@ uint8_t get_set_time(uint8_t set_flag)
 
 void check_uart()
 {
-  extern PORT far *port; // FIXME - this is in fujicom.c
   int uart;
 
 
-  uart = port_identify_uart(port);
+  uart = port_identify_uart();
   switch (uart) {
   case UART_16550A:
     consolef("Serial port is 16550A w/FIFO\n");
@@ -269,7 +296,7 @@ uint16_t parse_config(const uint8_t far *config_sys)
     }
     if (buf == buf_max)
       break;
-    
+
     if (!eq_flag) {
       *buf = '=';
       buf++;
@@ -288,4 +315,22 @@ uint16_t parse_config(const uint8_t far *config_sys)
 
  done:
   return buf - (char *) &config_env;
+}
+
+void find_drive_letter(uint8_t num_units)
+{
+  uint8_t far *lol;
+  char first;
+
+  _asm {
+    mov ah, 52h
+      int 21h
+      mov word ptr lol, bx
+      mov word ptr lol+2, es
+      }
+
+  // Undocumented but reliable field:
+  // The number of current block devices in the List of Lists at 0x20
+  first = lol[0x20] + 'A';
+  consolef("FujiNet attached to drives %c:-%c:\n", first, first + num_units - 1);
 }

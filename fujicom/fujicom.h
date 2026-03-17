@@ -8,6 +8,8 @@
 #undef FUJIF5_AS_FUNCTION
 
 #include <stdint.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 #define FUJINET_INT     0xF5
 #define FUJIINT_NONE    0x00
@@ -16,36 +18,22 @@
 
 #define FUJICOM_TIMEOUT  -1
 
-// FIXME - get these constants and structs from
-//         fujinet-firmware/lib/bus/rs232/rs232.h instead of
-//         redefining them here
+enum {
+  FUJI_FIELD_NONE        = 0,
+  FUJI_FIELD_A1          = 1,
+  FUJI_FIELD_A1_A2       = 2,
+  FUJI_FIELD_A1_A2_A3    = 3,
+  FUJI_FIELD_A1_A2_A3_A4 = 4,
+  FUJI_FIELD_B12         = 5,
+  FUJI_FIELD_B12_B34     = 6,
+  FUJI_FIELD_C1234       = 7,
+};
 
-#pragma pack(push, 1)
-typedef union {         /* Command Frame */
-  struct {
-    union {
-      struct {
-        uint8_t device; /* Destination Device */
-        uint8_t comnd;  /* Command */
-      };
-      uint16_t devcom;
-    };
-    union {
-      struct {
-        uint8_t aux1;   /* Auxiliary Parameter 1 */
-        uint8_t aux2;   /* Auxiliary Parameter 2 */
-        uint8_t aux3;   /* Auxiliary Parameter 3 */
-        uint8_t aux4;   /* Auxiliary Parameter 4 */
-      };
-      struct {
-        uint16_t aux12;
-        uint16_t aux34;
-      };
-      uint32_t aux;
-    };
-    uint8_t cksum;               /* 8-bit checksum */
-  };
-} cmdFrame_t;
+#define U32_MSW(v) ((uint16_t)(((uint32_t)(v) >> 16) & 0xFFFF))  // Most Significant Word
+#define U32_LSW(v) ((uint16_t)((uint32_t)(v) & 0xFFFF))          // Least Significant Word
+
+#define U16_MSB(w) ((uint8_t)(((uint16_t)(w) >> 8) & 0xFF))
+#define U16_LSB(w) ((uint8_t)((uint16_t)(w) & 0xFF))
 
 typedef struct {
   uint16_t bw;
@@ -59,40 +47,67 @@ typedef struct {
   char file[36];
 } deviceSlot_t;
 
+// FIXME - get this from lib/device/sio/fuji.h
+#define MAX_SSID_LEN 32
+typedef struct {
+  char ssid[MAX_SSID_LEN+1];
+  char hostname[64];
+  unsigned char localIP[4];
+  unsigned char gateway[4];
+  unsigned char netmask[4];
+  unsigned char dnsIP[4];
+  unsigned char macAddress[6];
+  unsigned char bssid[6];
+  char fn_version[15];
+} AdapterConfig;
+
 #pragma pack(pop)
 
 enum {
-  DEVICEID_DISK                 = 0x31,
-  DEVICEID_DISK_LAST            = 0x3F,
-  DEVICEID_PRINTER              = 0x40,
-  DEVICEID_PRINTER_LAST         = 0x43,
-  DEVICEID_FN_VOICE             = 0x43,
-  DEVICEID_APETIME              = 0x45,
-  DEVICEID_RS232                = 0x50,
-  DEVICEID_RS2323_LAST          = 0x53,
-  DEVICEID_FUJINET              = 0x70,
-  DEVICEID_FN_NETWORK           = 0x71,
-  DEVICEID_FN_NETWORK_LAST      = 0x78,
-  DEVICEID_MIDI                 = 0x99,
-  DEVICEID_CPM                  = 0x5A,
+  FUJI_DEVICEID_FUJINET      = 0x70,
+
+  FUJI_DEVICEID_DISK         = 0x31,
+  FUJI_DEVICEID_DISK_LAST    = 0x3F,
+  FUJI_DEVICEID_PRINTER      = 0x40,
+  FUJI_DEVICEID_PRINTER_LAST = 0x43,
+  FUJI_DEVICEID_VOICE        = 0x43,
+  FUJI_DEVICEID_CLOCK        = 0x45,
+  FUJI_DEVICEID_SERIAL       = 0x50,
+  FUJI_DEVICEID_SERIAL_LAST  = 0x53,
+  FUJI_DEVICEID_CPM          = 0x5A,
+  FUJI_DEVICEID_NETWORK      = 0x71,
+  FUJI_DEVICEID_NETWORK_LAST = 0x78,
+  FUJI_DEVICEID_MIDI         = 0x99,
 };
 
 enum {
-  CMD_CHDIR                     = 0x2c,
-  CMD_OPEN                      = 'O',
-  CMD_CLOSE                     = 'C',
-  CMD_READ                      = 'R',
-  CMD_WRITE                     = 'W',
-  CMD_STATUS                    = 'S',
-  CMD_PARSE                     = 'P',
-  CMD_QUERY                     = 'Q',
-  CMD_APETIME_GETTIME           = 0x93,
-  CMD_APETIME_SETTZ             = 0x99,
-  CMD_APETIME_GETTZTIME         = 0x9A,
-  CMD_READ_DEVICE_SLOTS         = 0xF2,
-  CMD_JSON                      = 0xFC,
-  CMD_USERNAME                  = 0xFD,
-  CMD_PASSWORD                  = 0xFE,
+  FUJICMD_RENAME            = 0x20,
+  FUJICMD_DELETE            = 0x21,
+  FUJICMD_SEEK              = 0x25,
+  FUJICMD_TELL              = 0x26,
+  FUJICMD_MKDIR             = 0x2a,
+  FUJICMD_RMDIR             = 0x2b,
+  FUJICMD_CHDIR             = 0x2c,
+  FUJICMD_GETCWD            = 0x30,
+  FUJICMD_OPEN              = 'O',
+  FUJICMD_CLOSE             = 'C',
+  FUJICMD_READ              = 'R',
+  FUJICMD_WRITE             = 'W',
+  FUJICMD_STATUS            = 'S',
+  FUJICMD_PARSE             = 'P',
+  FUJICMD_QUERY             = 'Q',
+  FUJICMD_APETIME_GETTIME   = 0x93,
+  FUJICMD_APETIME_SETTZ     = 0x99,
+  FUJICMD_APETIME_GETTZTIME = 0x9A,
+  FUJICMD_MOUNT_ALL         = 0xD7,
+  FUJICMD_GET_ADAPTERCONFIG = 0xE8,
+  FUJICMD_UNMOUNT_IMAGE     = 0xE9,
+  FUJICMD_READ_DEVICE_SLOTS = 0xF2,
+  FUJICMD_MOUNT_IMAGE       = 0xF8,
+  FUJICMD_MOUNT_HOST        = 0xF9,
+  FUJICMD_JSON              = 0xFC,
+  FUJICMD_USERNAME          = 0xFD,
+  FUJICMD_PASSWORD          = 0xFE,
 };
 
 enum {
@@ -130,6 +145,8 @@ enum {
   NETWORK_ERROR_COULD_NOT_PARSE_JSON            = 213,
   NETWORK_ERROR_CLIENT_GENERAL                  = 214,
   NETWORK_ERROR_SERVER_GENERAL                  = 215,
+  NETWORK_ERROR_NO_DEVICE_AVAILABLE             = 216,
+  NETWORK_ERROR_NOT_A_DIRECTORY                 = 217,
   NETWORK_ERROR_COULD_NOT_ALLOCATE_BUFFERS      = 255,
 };
 
@@ -145,35 +162,10 @@ enum {
  */
 extern void fujicom_init(void);
 
-/**
- * @brief calculate 8-bit checksum for cmdFrame_t.dcksum
- * @param buf Buffer to compute checksum against
- * @param len Length of aforementioned buffer
- */
-extern uint8_t fujicom_cksum(void far *ptr, uint16_t len);
-
-/**
- * @brief send FujiNet frame with no payload
- * @param cmdFrame Pointer to command frame
- * @return 'C'omplete, 'E'rror, or 'N'ak
- */
-extern int fujicom_command(cmdFrame_t far *c);
-
-/**
- * @brief send fujinet frame and read payload
- * @param cmdFrame pointer to command frame
- * @param buf Pointer to buffer to receive
- * @param len Expected buffer length
- */
-extern int fujicom_command_read(cmdFrame_t far *c, void far *ptr, uint16_t len);
-
-/**
- * @brief send fujinet frame and write payload
- * @param cmdFrame pointer to command frame
- * @param buf pointer to buffer to send.
- * @param len Length of buffer to send.
- */
-extern int fujicom_command_write(cmdFrame_t far *c, void far *ptr, uint16_t len);
+extern bool fuji_bus_call(uint8_t device, uint8_t fuji_cmd, uint8_t fields,
+                          uint8_t aux1, uint8_t aux2, uint8_t aux3, uint8_t aux4,
+                          const void far *data, size_t data_length,
+                          void far *reply, size_t reply_length);
 
 /**
  * @brief end fujicom
@@ -181,21 +173,21 @@ extern int fujicom_command_write(cmdFrame_t far *c, void far *ptr, uint16_t len)
 void fujicom_done(void);
 
 #ifndef FUJIF5_AS_FUNCTION
-extern int fujiF5w(uint16_t direction, uint16_t devcom,
+extern int fujiF5w(uint16_t descrdir, uint16_t devcom,
                   uint16_t aux12, uint16_t aux34, void far *buffer, uint16_t length);
 #pragma aux fujiF5w = \
   "int 0xf5" \
   parm [dx] [ax] [cx] [si] [es bx] [di] \
   modify [ax]
-#define fujiF5(dx, dev, cmd, a12, a34, buf, len) \
-  fujiF5w(dx, cmd << 8 | dev, a12, a34, buf, len)
+#define fujiF5(dir, dev, cmd, descr, a12, a34, buf, len)         \
+  fujiF5w(descr << 8 | dir, cmd << 8 | dev, a12, a34, buf, len)
 #else
-extern int fujiF5(uint8_t direction, uint8_t device, uint8_t command,
+extern int fujiF5(uint8_t direction, uint8_t device, uint8_t command, uint8_t descr,
                   uint16_t aux12, uint16_t aux34, void far *buffer, uint16_t length);
 #endif
 
-#define fujiF5_none(d, c, a12, a34, b, l) fujiF5(FUJIINT_NONE, d, c, a12, a34, b, l)
-#define fujiF5_read(d, c, a12, a34, b, l) fujiF5(FUJIINT_READ, d, c, a12, a34, b, l)
-#define fujiF5_write(d, c, a12, a34, b, l) fujiF5(FUJIINT_WRITE, d, c, a12, a34, b, l)
+#define fujiF5_none(d, c, fd, a12, a34, b, l) fujiF5(FUJIINT_NONE, d, c, fd, a12, a34, b, l)
+#define fujiF5_read(d, c, fd, a12, a34, b, l) fujiF5(FUJIINT_READ, d, c, fd, a12, a34, b, l)
+#define fujiF5_write(d, c, fd, a12, a34, b, l) fujiF5(FUJIINT_WRITE, d, c, fd, a12, a34, b, l)
 
 #endif /* _FUJICOM_H */
