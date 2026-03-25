@@ -53,9 +53,12 @@ dkms.conf
 
 *~
 *.sys
+!config.sys
 *.err
 #*#
 .#*
 
 *.img
 *.zip
+.vscode/settings.json
+.vscode/c_cpp_properties.json

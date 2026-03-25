@@ -1,14 +1,35 @@
 #include "commands.h"
 #include "fujinet.h"
 #include "sys_hdr.h"
-#include "fujicom.h"
-#include "print.h"
+#include <fuji_f5.h>
 #include <string.h>
 #include <dos.h>
 
 extern void End_code(void);
 
-static cmdFrame_t cmd; // FIXME - make this shared with init.c?
+#define PRN_BUF_SIZE 255
+
+static unsigned char prn_buf[PRN_BUF_SIZE];
+static uint16_t prn_buf_len = 0;
+
+int flush_prn_buf(void)
+{
+    int ok = 1;
+    if (prn_buf_len > 0) {
+        ok = fujiF5_write(FUJI_DEVICEID_PRINTER, FUJICMD_WRITE, FUJI_FIELD_NONE, 0, 0, prn_buf, prn_buf_len);
+        prn_buf_len = 0;
+    }
+    return ok;
+}
+
+int prn_buf_add(unsigned char c)
+{
+    prn_buf[prn_buf_len++] = c;
+    if (prn_buf_len >= PRN_BUF_SIZE)
+        return flush_prn_buf();
+    return 1;
+}
+
 
 uint16_t Media_check_cmd(SYSREQ far *req)
 {
@@ -47,13 +68,8 @@ uint16_t Input_flush_cmd(SYSREQ far *req)
 
 uint16_t Output_cmd(SYSREQ far *req)
 {
-    char c;
-    cmd.device = 0x40;
-    cmd.comnd = 'W';
-    c=req->io.buffer_ptr[0];
-    if (fujicom_command_write(&cmd,&c,1) != 'C')
+    if (!prn_buf_add(req->io.buffer_ptr[0]))
         return ERROR_BIT | NOT_READY;
-
     return OP_COMPLETE;
 }
 
@@ -69,7 +85,8 @@ uint16_t Output_status_cmd(SYSREQ far *req)
 
 uint16_t Output_flush_cmd(SYSREQ far *req)
 {
-    return UNKNOWN_CMD;
+    flush_prn_buf();
+    return OP_COMPLETE;
 }
 
 uint16_t Ioctl_output_cmd(SYSREQ far *req)
@@ -84,7 +101,8 @@ uint16_t Dev_open_cmd(SYSREQ far *req)
 
 uint16_t Dev_close_cmd(SYSREQ far *req)
 {
-  return OP_COMPLETE;
+    flush_prn_buf();
+    return OP_COMPLETE;
 }
 
 uint16_t Remove_media_cmd(SYSREQ far *req)

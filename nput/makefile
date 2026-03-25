@@ -1,16 +1,16 @@
 AS      = wasm -q
 ASFLAGS = -0 -mt -bt=DOS
 CC      = wcc -q
-CFLAGS  = -0 -bt=dos -ms -I../include -osh $(CPPFLAGS)
+CFLAGS  = -0 -bt=dos -ms -I../fujicom -osh $(CPPFLAGS)
 LD	= wlink OPTION quiet
 LDFLAGS = SYSTEM dos OPTION MAP LIBPATH ../fujicom
 
-all: fmount.exe
+all: nput.exe
 
-fmount.exe: fmount.obj getargs.obj
+nput.exe: nput.obj
 
 .obj.exe:
-	$(LD) $(LDFLAGS) NAME $@ file {$< ../sys/print.obj} LIBRARY {clibs.lib}
+	$(LD) $(LDFLAGS) NAME $@ file {$< ../sys/print.obj} LIBRARY {fujicoms.lib clibs.lib}
 .c.obj: .AUTODEPEND
 	$(CC) $(CFLAGS) -fo=$@ $<
 .asm.obj: .AUTODEPEND
